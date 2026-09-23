@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Neutral Agent">
+  <title>Neutral Agent</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Sfondo -->
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect width="64" height="64" rx="14" fill="url(#gloss)"/>
+
+  <!-- Bilancia in equilibrio: spot da una parte, short dall'altra -->
+  <g fill="#ffffff">
+    <rect x="30.75" y="14" width="2.5" height="34" rx="1.25"/>
+    <rect x="22" y="47" width="20" height="4" rx="2"/>
+    <rect x="12" y="17" width="40" height="2.5" rx="1.25"/>
+    <circle cx="32" cy="14" r="3"/>
+  </g>
+  <g stroke="#ffffff" stroke-opacity="0.8" stroke-width="1.6" stroke-linecap="round" fill="none">
+    <path d="M14 19 L9 32 M14 19 L19 32"/>
+    <path d="M50 19 L45 32 M50 19 L55 32"/>
+  </g>
+  <!-- piatti: verde (spot, sale) e bianco (short) -->
+  <path d="M7 32 H21 C21 36.5 17.9 39 14 39 C10.1 39 7 36.5 7 32 Z" fill="#a7f3d0"/>
+  <path d="M43 32 H57 C57 36.5 53.9 39 50 39 C46.1 39 43 36.5 43 32 Z" fill="#ffffff"/>
+</svg>
