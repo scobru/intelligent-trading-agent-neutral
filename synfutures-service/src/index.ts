@@ -57,7 +57,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use(express.json());
 
 // Initialize SynFutures service
-const rpcUrl = process.env.BASE_RPC || 'https://mainnet.base.org';
+const rpcUrl = process.env.BASE_RPC || process.env.BASE_RPC_URL || 'https://mainnet.base.org';
 const privateKey = process.env.SYNFUTURES_PRIVATE_KEY;
 
 const synfutures = new SynFuturesService(rpcUrl, privateKey);

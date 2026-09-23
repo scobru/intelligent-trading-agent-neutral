@@ -48,11 +48,14 @@ export class SynFuturesService {
             // Initialize SDK for Base chain
             this.sdk = SynFuturesV3.getInstance('base');
             
-            // Override RPC URL if provided
+            // Il provider va passato con setProvider(): l'SDK crea i contratti
+            // (gate, observer, config) solo quando riceve un provider, e da
+            // solo lo cerca nella variabile BASE_RPC. Assegnare ctx.provider a
+            // mano lasciava i contratti vuoti ("reading 'gate'") se BASE_RPC
+            // non era impostata.
             if (this.rpcUrl) {
-                // The SDK uses the default RPC, but we can set up our own provider
                 const provider = new ethers.providers.JsonRpcProvider(this.rpcUrl);
-                this.sdk.ctx.provider = provider;
+                this.sdk.setProvider(provider, true);
             }
 
             await this.sdk.init();
