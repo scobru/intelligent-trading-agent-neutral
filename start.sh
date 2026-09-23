@@ -14,6 +14,8 @@ echo "[1/3] Starting SynFutures microservice on port 3100..."
 (
     cd /app/synfutures-service
     export SYNFUTURES_PORT=3100
+    # l'SDK legge l'RPC da BASE_RPC: la allineiamo a BASE_RPC_URL del bot
+    export BASE_RPC="${BASE_RPC:-${BASE_RPC_URL:-https://mainnet.base.org}}"
     export SYNFUTURES_PRIVATE_KEY="${SYNFUTURES_PRIVATE_KEY:-${PRIVATE_KEY:-}}"
     if [ "${PAPER_TRADING:-false}" = "true" ] || [ "${DRY_RUN:-true}" = "true" ]; then
         # in paper/dry-run il servizio resta in sola lettura
