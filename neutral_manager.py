@@ -51,6 +51,16 @@ class NeutralManager:
     def mode(self) -> str:
         return "paper" if self.paper else ("dry_run" if config.DRY_RUN else "live")
 
+    # ------------------------------------------------------------ auto-refuel
+    def ensure_usdc_balance(self) -> Optional[Dict[str, Any]]:
+        """
+        Se in modalita' on-chain e il saldo USDC nel wallet e' insufficiente,
+        ma c'e' ETH spendibile oltre la riserva gas, swappa in automatico l'eccesso in USDC.
+        """
+        if self.paper or not self.client:
+            return None
+        return self.uniswap.auto_refuel_usdc()
+
     # ------------------------------------------------------------ mercati
     def load_markets(self) -> Dict[str, Dict[str, Any]]:
         markets = funding.parse_markets(self.sf.funding_raw())

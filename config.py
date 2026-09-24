@@ -97,6 +97,12 @@ TX_DEADLINE_SECONDS = _i("TX_DEADLINE_SECONDS", 300)
 TX_TIMEOUT_SECONDS = _i("TX_TIMEOUT_SECONDS", 180)
 HTTP_TIMEOUT = _i("HTTP_TIMEOUT", 30)
 
+# ---------------------------------------------------------------- auto-refuel USDC da ETH
+AUTO_SWAP_ETH_TO_USDC = _b("AUTO_SWAP_ETH_TO_USDC", True)
+ETH_GAS_RESERVE = _f("ETH_GAS_RESERVE", 0.003)          # Riserva di ETH nativo per gas fee
+MIN_ETH_SWAP_AMOUNT = _f("MIN_ETH_SWAP_AMOUNT", 0.002)   # Soglia minima di ETH spendibile
+USDC_AUTO_SWAP_THRESHOLD = _f("USDC_AUTO_SWAP_THRESHOLD", 5.0)  # Attiva swap se USDC < soglia
+
 # Stime dei costi per i conti di convenienza (andata + ritorno)
 EST_SWAP_COST_BPS = _f("EST_SWAP_COST_BPS", 10.0)    # fee del pool 0.05% + slippage
 EST_PERP_FEE_BPS = _f("EST_PERP_FEE_BPS", 5.0)       # taker SynFutures per lato

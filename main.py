@@ -59,6 +59,14 @@ def run_cycle():
     sf = SynFuturesClient()
     manager = NeutralManager(client, sf)
 
+    # 0. Auto-refuel USDC se il saldo e' sotto soglia ma c'e' ETH disponibile
+    try:
+        refuel_res = manager.ensure_usdc_balance()
+        if refuel_res:
+            print(f"⛽ Auto-refuel completato: {refuel_res.get('description', '')}")
+    except Exception as exc:
+        print(f"⚠️  Auto-refuel non riuscito (proseguo con saldo attuale): {exc}")
+
     # 1. Funding
     print("📡 Lettura del funding su SynFutures...")
     markets = manager.load_markets()
@@ -170,6 +178,12 @@ if __name__ == "__main__":
         client = _client()
         sf = SynFuturesClient()
         display_status(get_status(client, sf))
+        sys.exit(0)
+
+    if "--refuel" in sys.argv:
+        from tools.refuel import run_refuel_cli
+        client = _client()
+        run_refuel_cli(client)
         sys.exit(0)
 
     if not config.PAPER_TRADING and not config.WALLET_ADDRESS:
