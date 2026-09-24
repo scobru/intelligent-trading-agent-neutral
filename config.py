@@ -56,6 +56,10 @@ UNISWAP_V3_QUOTER_V2 = "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a"
 UNISWAP_V3_SWAP_ROUTER_02 = "0x2626664c2603336E57B271c5C0b26F421741e481"
 FEE_TIERS = (100, 500, 3000, 10000)
 
+# SynFutures V3 Gate (contratto di deposito collaterale su Base)
+SYNFUTURES_GATE = "0x208B443983D8BcC8578e9D86Db23FbA547071270"
+GATE_MARGIN_BUFFER = _f("GATE_MARGIN_BUFFER", 1.20)  # cuscinetto di sicurezza (+20%)
+
 KNOWN_ASSETS = {
     "USDC": {"address": USDC, "decimals": 6, "stable": True},
     "WETH": {"address": WETH, "decimals": 18, "stable": False},
@@ -107,6 +111,34 @@ MAX_ASSET_PCT = _f("MAX_ASSET_PCT", 0.60)          # quota massima su un solo as
 MIN_POSITION_USD = _f("MIN_POSITION_USD", 150.0)   # capitale totale per coppia
 MAX_POSITION_USD = _f("MAX_POSITION_USD", 5000.0)
 MIN_NOTIONAL_USD = _f("MIN_NOTIONAL_USD", 70.0)    # minimo di SynFutures su Base
+
+
+def min_gate_usdc_per_pair() -> float:
+    """
+    Margine minimo USDC necessario sul Gate per aprire una singola coppia.
+    Con leva L e capitale minimo C: margine teorico M = C / (L + 1).
+    SynFutures accetta ordini solo fino al 90% del saldo Gate; in piu'
+    applichiamo GATE_MARGIN_BUFFER (+20%) per reggere funding e volatilita'.
+    """
+    margin = MIN_POSITION_USD / (PERP_LEVERAGE + 1)
+    return round((margin / 0.9) * GATE_MARGIN_BUFFER, 2)
+
+
+def recommended_gate_usdc(total_capital: float = None) -> float:
+    """
+    Quantita' raccomandata di USDC da tenere sul Gate SynFutures per far
+    funzionare la strategia senza intoppi.
+    Se total_capital non e' specificato, calcola il minimo per coprire
+    tutti gli asset configurati in NEUTRAL_ASSETS.
+    """
+    num_assets = max(1, len(NEUTRAL_ASSETS))
+    min_rec = round(num_assets * min_gate_usdc_per_pair(), 2)
+    if total_capital is None or total_capital <= 0:
+        return min_rec
+
+    margin_total = total_capital / (PERP_LEVERAGE + 1)
+    rec = round((margin_total / 0.9) * GATE_MARGIN_BUFFER, 2)
+    return max(min_rec, rec)
 
 # ---------------------------------------------------------------- funding
 FUNDING_LOOKBACK_HOURS = _f("FUNDING_LOOKBACK_HOURS", 24.0)

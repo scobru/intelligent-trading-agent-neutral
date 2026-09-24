@@ -207,5 +207,55 @@ class FundingHistoryTest(TmpState):
         self.assertEqual(data["funding_latest"][0]["asset"], "ETH")
 
 
+class GateMarginTest(unittest.TestCase):
+    def test_encode_gate_param(self):
+        from base_client import encode_gate_param
+        # 100 USDC (100,000,000 raw) + USDC address on Base
+        packed = encode_gate_param(config.USDC, 100000000)
+        self.assertEqual(len(packed), 32)
+        # Check amount part (first 12 bytes)
+        self.assertEqual(int.from_bytes(packed[:12], "big"), 100000000)
+        # Check token part (last 20 bytes)
+        self.assertEqual("0x" + packed[12:].hex().lower(), config.USDC.lower())
+
+    def test_recommended_gate_usdc(self):
+        # min per pair: (150 / 3) / 0.9 * 1.20 = 50 / 0.9 * 1.20 = 66.67
+        min_pair = config.min_gate_usdc_per_pair()
+        self.assertAlmostEqual(min_pair, 66.67, places=2)
+
+        # 2 configured assets (ETH, BTC) -> min 2 * 66.67 = 133.34
+        rec = config.recommended_gate_usdc()
+        self.assertAlmostEqual(rec, len(config.NEUTRAL_ASSETS) * min_pair, places=2)
+
+        # Custom capital $1000: (1000 / 3) / 0.9 * 1.20 = 444.44
+        rec_1000 = config.recommended_gate_usdc(1000.0)
+        self.assertAlmostEqual(rec_1000, 444.44, places=2)
+
+    def test_check_open_with_existing_gate_balance(self):
+        config.PAPER_TRADING = False
+        mgr = NeutralManager(client=None, synfutures=None)
+        m = market(mark=1000, fair=1001, long_=2000, short=1000)
+
+        # Scenario: Total portfolio = $300 (idle = $300).
+        # Target portion = 0.5 -> Capital = $150 ($100 notional, $50 margin).
+        # Gate already has $50 USDC.
+        # Wallet has $100 USDC.
+        # This SHOULD pass without requiring extra Gate deposit.
+        status = {
+            "total_value_usd": 300.0,
+            "idle_usd": 300.0,
+            "usdc_balance": 100.0,
+            "gate_usdc": 50.0,
+            "eth_balance": 0.01,
+            "positions": [],
+        }
+        decision = {"operation": "open", "asset": "ETH", "target_portion_of_portfolio": 0.5}
+        reason, plan = mgr.check_open(decision, status, {"ETH": m})
+        self.assertIsNone(reason)
+        self.assertEqual(plan["capital_usd"], 150.0)
+        self.assertEqual(plan["notional_usd"], 100.0)
+        self.assertEqual(plan["margin_usd"], 50.0)
+
+
 if __name__ == "__main__":
     unittest.main()

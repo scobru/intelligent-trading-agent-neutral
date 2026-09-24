@@ -212,15 +212,26 @@ class NeutralManager:
             return (f"i costi (${funding.round_trip_cost(notional):.2f}) si ripagano in "
                     f"{'mai' if be is None else f'{be:.1f} giorni'}, oltre {config.MAX_BREAKEVEN_DAYS:.0f}"), {}
 
+        margin_usd = capital - notional
         if not self.paper:
             if status["eth_balance"] is not None and status["eth_balance"] < config.MIN_ETH_RESERVE:
                 return f"ETH per il gas {status['eth_balance']:.5f} sotto la riserva di {config.MIN_ETH_RESERVE}", {}
-            if (status["usdc_balance"] or 0) < capital:
-                return (f"USDC nel wallet ${status['usdc_balance'] or 0:.2f} insufficienti "
-                        f"per ${capital:.2f} (il capitale sul Gate va ritirato prima)"), {}
+
+            gate_usdc = float(status.get("gate_usdc") or 0.0)
+            wallet_usdc = float(status.get("usdc_balance") or 0.0)
+            gate_shortfall = max(0.0, margin_usd - gate_usdc)
+            wallet_needed = notional + gate_shortfall
+
+            if wallet_usdc < wallet_needed:
+                shortfall_msg = (
+                    f" e ${gate_shortfall:.2f} da depositare sul Gate (Gate ha gia' ${gate_usdc:.2f})"
+                    if gate_shortfall > 0 else f" (margine Gate ${gate_usdc:.2f} gia' presente)"
+                )
+                return (f"USDC nel wallet ${wallet_usdc:.2f} insufficienti: servono ${wallet_needed:.2f} "
+                        f"(${notional:.2f} per spot Uniswap{shortfall_msg})"), {}
 
         return None, {"asset": asset, "market": m, "capital_usd": capital, "notional_usd": notional,
-                      "margin_usd": capital - notional, "entry_apr": apr, "breakeven_days": be}
+                      "margin_usd": margin_usd, "entry_apr": apr, "breakeven_days": be}
 
     # ------------------------------------------------------------ esecuzione
     def execute_signal(self, decision: Dict[str, Any], status: Dict[str, Any],
@@ -261,20 +272,41 @@ class NeutralManager:
         margin = plan["margin_usd"]
         leverage = expected_qty * m["mark_price"] / (margin * GATE_MARGIN_USE)
 
+        gate_usdc = 0.0
+        try:
+            gate_usdc = self.sf.gate_usdc(self.client.address)
+        except Exception as gerr:
+            logger.warning("Impossibile leggere saldo Gate prima dell'apertura: %s", gerr)
+
+        to_deposit = max(0.0, margin - gate_usdc)
+
         if config.DRY_RUN:
-            return dict(base, status="dry_run", plan=[
+            plan_steps = [
                 f"swap ${plan['notional_usd']:.2f} USDC -> ~{expected_qty:.6f} {asset} ({route.describe(self.client)})",
-                f"deposito ${margin:.2f} USDC sul Gate SynFutures",
-                f"short {m['symbol']} ~{expected_qty:.6f} con margine ${margin * GATE_MARGIN_USE:.2f} "
-                f"(leva {leverage:.2f}x)",
-            ])
+            ]
+            if to_deposit > 0.01:
+                plan_steps.append(
+                    f"deposito ${to_deposit:.2f} USDC sul Gate SynFutures (saldo attuale ${gate_usdc:.2f}, necessario ${margin:.2f})"
+                )
+            else:
+                plan_steps.append(
+                    f"margine ${margin:.2f} USDC gia' presente sul Gate SynFutures (${gate_usdc:.2f} disponibili)"
+                )
+            plan_steps.append(
+                f"short {m['symbol']} ~{expected_qty:.6f} con margine ${margin * GATE_MARGIN_USE:.2f} (leva {leverage:.2f}x)"
+            )
+            return dict(base, status="dry_run", plan=plan_steps)
 
         txs: List[Dict[str, Any]] = []
         before = self.client.balance_of(spot)
         txs.append(self.uniswap.swap(route, config.DEFAULT_SLIPPAGE_BPS))
         qty = (self.client.balance_of(spot) - before) / 10 ** config.MARKETS[asset]["decimals"]
         try:
-            txs.append(dict(self.sf.deposit_usdc(margin), description="deposito Gate"))
+            if to_deposit > 0.01:
+                logger.info("Deposito di $%.2f USDC sul Gate SynFutures...", to_deposit)
+                dep_res = self.sf.deposit_usdc(to_deposit)
+                txs.append(dict(dep_res, description=f"deposito Gate (${to_deposit:.2f} USDC)"))
+                time.sleep(2)
             leverage = qty * m["mark_price"] / (margin * GATE_MARGIN_USE)
             txs.append(dict(self.sf.open_short(m["symbol"], margin * GATE_MARGIN_USE, leverage),
                             description=f"short {m['symbol']}"))

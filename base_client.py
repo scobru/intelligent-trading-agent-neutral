@@ -36,6 +36,44 @@ ERC20_ABI = [
 
 MAX_UINT256 = 2 ** 256 - 1
 
+GATE_ABI = [
+    {
+        "inputs": [{"internalType": "bytes32", "name": "arg", "type": "bytes32"}],
+        "name": "deposit",
+        "outputs": [],
+        "stateMutability": "payable",
+        "type": "function",
+    },
+    {
+        "inputs": [{"internalType": "bytes32", "name": "arg", "type": "bytes32"}],
+        "name": "withdraw",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    },
+    {
+        "inputs": [
+            {"internalType": "address", "name": "quote", "type": "address"},
+            {"internalType": "address", "name": "user", "type": "address"},
+        ],
+        "name": "reserveOf",
+        "outputs": [{"internalType": "uint256", "name": "balance", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function",
+    },
+]
+
+
+def encode_gate_param(token_address: str, amount_raw: int) -> bytes:
+    """
+    Codifica i parametri per deposit e withdraw sul Gate di SynFutures:
+    96-bit (12 bytes) uint96 amount + 160-bit (20 bytes) address token = 32 bytes (bytes32).
+    """
+    token_clean = Web3.to_checksum_address(token_address).lower().replace("0x", "")
+    token_bytes = bytes.fromhex(token_clean)
+    amount_bytes = int(amount_raw).to_bytes(12, byteorder="big")
+    return amount_bytes + token_bytes
+
 
 class BaseChainError(RuntimeError):
     """Errore non recuperabile nell'interazione con la chain."""
@@ -122,6 +160,70 @@ class BaseClient:
             .call()
         )
 
+    # ------------------------------------------------------------ SynFutures Gate
+    def gate_contract(self):
+        return self.w3.eth.contract(
+            address=Web3.to_checksum_address(config.SYNFUTURES_GATE),
+            abi=GATE_ABI,
+        )
+
+    def gate_balance_of(self, token_address: str, address: str = None) -> int:
+        addr = Web3.to_checksum_address(address or self.address)
+        token = Web3.to_checksum_address(token_address)
+        return int(self.gate_contract().functions.reserveOf(token, addr).call())
+
+    def gate_balance_of_float(self, token_address: str, address: str = None) -> float:
+        raw = self.gate_balance_of(token_address, address)
+        return raw / (10 ** self.decimals(token_address))
+
+    def deposit_to_gate(self, token_address: str, amount_float: float) -> Dict[str, Any]:
+        """
+        Approva il Gate di SynFutures e deposita il token (es. USDC).
+        """
+        token = Web3.to_checksum_address(token_address)
+        amount_raw = int(amount_float * (10 ** self.decimals(token_address)))
+        if amount_raw <= 0:
+            raise BaseChainError("Importo di deposito non valido")
+
+        # 1. Ensure allowance
+        allow_res = self.ensure_allowance(token, config.SYNFUTURES_GATE, amount_raw)
+
+        # 2. Deposit
+        param = encode_gate_param(token, amount_raw)
+        tx = self.gate_contract().functions.deposit(param).build_transaction({
+            "from": self.address,
+            "nonce": self.w3.eth.get_transaction_count(self.address),
+            "chainId": config.CHAIN_ID,
+            "value": 0,
+        })
+        tx.pop("maxFeePerGas", None)
+        tx.pop("maxPriorityFeePerGas", None)
+        sym = self.symbol(token_address)
+        res = self.send_transaction(tx, description=f"deposito Gate ({amount_float:.4f} {sym})")
+        if allow_res:
+            res["approval_tx"] = allow_res
+        return res
+
+    def withdraw_from_gate(self, token_address: str, amount_float: float) -> Dict[str, Any]:
+        """
+        Ritira il token dal Gate di SynFutures nel wallet.
+        """
+        token = Web3.to_checksum_address(token_address)
+        amount_raw = int(amount_float * (10 ** self.decimals(token_address)))
+        if amount_raw <= 0:
+            raise BaseChainError("Importo di ritiro non valido")
+
+        param = encode_gate_param(token, amount_raw)
+        tx = self.gate_contract().functions.withdraw(param).build_transaction({
+            "from": self.address,
+            "nonce": self.w3.eth.get_transaction_count(self.address),
+            "chainId": config.CHAIN_ID,
+        })
+        tx.pop("maxFeePerGas", None)
+        tx.pop("maxPriorityFeePerGas", None)
+        sym = self.symbol(token_address)
+        return self.send_transaction(tx, description=f"ritiro Gate ({amount_float:.4f} {sym})")
+
     # ------------------------------------------------------------ verifica indirizzi
     def verify_contracts(self, tokens: Dict[str, Dict[str, Any]] = None) -> List[str]:
         """
@@ -135,6 +237,7 @@ class BaseClient:
             ("UNISWAP_V3_FACTORY", config.UNISWAP_V3_FACTORY),
             ("UNISWAP_V3_QUOTER_V2", config.UNISWAP_V3_QUOTER_V2),
             ("UNISWAP_V3_SWAP_ROUTER_02", config.UNISWAP_V3_SWAP_ROUTER_02),
+            ("SYNFUTURES_GATE", config.SYNFUTURES_GATE),
         ):
             try:
                 code = self.w3.eth.get_code(Web3.to_checksum_address(addr))

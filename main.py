@@ -151,6 +151,27 @@ def run_cycle():
 
 
 if __name__ == "__main__":
+    if "--deposit-gate" in sys.argv:
+        from tools.deposit_gate import do_deposit
+        client = _client()
+        sf = SynFuturesClient()
+        amount = 0.0
+        for i, arg in enumerate(sys.argv):
+            if arg == "--deposit-gate" and i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("-"):
+                try:
+                    amount = float(sys.argv[i + 1])
+                except ValueError:
+                    pass
+        do_deposit(client, sf, amount=amount, dry_run=config.DRY_RUN)
+        sys.exit(0)
+
+    if "--gate-status" in sys.argv:
+        from tools.deposit_gate import get_status, display_status
+        client = _client()
+        sf = SynFuturesClient()
+        display_status(get_status(client, sf))
+        sys.exit(0)
+
     if not config.PAPER_TRADING and not config.WALLET_ADDRESS:
         raise RuntimeError("WALLET_ADDRESS mancante nel .env (non serve solo in PAPER_TRADING)")
     if not os.getenv("OPENROUTER_API_KEY"):

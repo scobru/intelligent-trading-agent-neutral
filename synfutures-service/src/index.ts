@@ -41,14 +41,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     }
 
     const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-        console.warn('[WARN] API_KEY not configured. Refusing requests.');
-        return res.status(500).json({ error: 'Server configuration error' });
-    }
-
-    const clientApiKey = req.headers['x-api-key'];
-    if (!clientApiKey || clientApiKey !== apiKey) {
-        return res.status(401).json({ error: 'Unauthorized' });
+    if (apiKey) {
+        const clientApiKey = req.headers['x-api-key'];
+        if (!clientApiKey || clientApiKey !== apiKey) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
     }
 
     next();
@@ -175,6 +172,14 @@ app.get('/instrument/:symbol', asyncHandler(async (req, res) => {
 
     console.log(`[DATA] Instrument ${symbol}: markPrice=${markPrice}, fairPrice=${fairPrice}`);
     res.json(serialized);
+}));
+
+/**
+ * Get Gate info (contract address, supported tokens)
+ */
+app.get('/gate/info', asyncHandler(async (req, res) => {
+    const info = await synfutures.getGateInfo();
+    res.json(info);
 }));
 
 /**

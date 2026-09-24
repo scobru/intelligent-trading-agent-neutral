@@ -75,7 +75,17 @@ class SynFuturesClient:
         rows = self._request("GET", "/funding")
         return rows if isinstance(rows, list) else []
 
-    # ------------------------------------------------------------ conto
+    def gate_info(self) -> Dict[str, Any]:
+        """Informazioni sul contratto Gate (indirizzo, token supportati)."""
+        try:
+            return self._request("GET", "/gate/info")
+        except Exception:
+            return {"gateAddress": config.SYNFUTURES_GATE, "chainId": config.CHAIN_ID}
+
+    def recommended_deposit(self, total_capital: Optional[float] = None) -> float:
+        """Restituisce la quantita' consigliata di USDC da depositare sul Gate."""
+        return config.recommended_gate_usdc(total_capital)
+
     def gate_usdc(self, address: str) -> float:
         total = 0.0
         for b in self._request("GET", f"/gate/balance/{address}") or []:

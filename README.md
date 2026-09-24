@@ -80,6 +80,31 @@ chiusura fa il percorso inverso (chiude lo short, ritira dal Gate, vende lo
 spot); se un passo fallisce la coppia resta nel registro e il ciclo
 successivo la vede come hedge rotto e riprova.
 
+### 🚪 Collaterale sul Gate di SynFutures
+
+Su SynFutures V3 i fondi a garanzia dei contratti perpetual risiedono nel contratto **Gate** (`0x208B443983D8BcC8578e9D86Db23FbA547071270` su Base).
+
+#### Quanti USDC servono sul Gate?
+La quantita' necessaria dipende dai parametri di dimensionamento (`MIN_POSITION_USD = $150`, `PERP_LEVERAGE = 2`):
+- Per una posizione minima da $150: nozionale spot $100, margine short $50.
+- Il protocollo/microservizio accetta ordini solo fino al **90%** del saldo Gate (`availableMargin × 0.9`), a cui si somma un cuscinetto del **+20%** (`GATE_MARGIN_BUFFER = 1.20`) per assorbire funding negativo o variazioni di prezzo senza rischiare la chiusura anticipata.
+- **Minimo per 1 coppia (es. ETH):** **~60-67 USDC** sul Gate (+ 100 USDC nel wallet per lo spot).
+- **Minimo per 2 coppie (ETH + BTC):** **~120-135 USDC** sul Gate (+ 200 USDC nel wallet per lo spot).
+- **Portafoglio da $1.000:** **~350-400 USDC** sul Gate e il resto nel wallet.
+
+#### Strumento di gestione Gate:
+```bash
+# Verifica saldi e fabbisogno calcolato per la strategia
+python tools/deposit_gate.py --status
+
+# Deposita automaticamente l'importo raccomandato sul Gate
+python tools/deposit_gate.py --deposit
+
+# Deposita o ritira un importo personalizzato
+python tools/deposit_gate.py --deposit --amount 100
+python tools/deposit_gate.py --withdraw --amount 50
+```
+
 ---
 
 ## 🚀 Avvio

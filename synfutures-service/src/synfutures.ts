@@ -433,12 +433,40 @@ export class SynFuturesService {
         const token = await this.sdk.ctx.getTokenInfo(tokenSymbol);
         const amountParsed = ethers.utils.parseUnits(amount, token.decimals);
 
-        const erc20 = new ethers.Contract(token.address, ['function approve(address,uint256) returns (bool)', 'function allowance(address,address) view returns (uint256)'], signer);
-        const allowance = await erc20.allowance(signer.address, this.sdk.contracts.gate.address);
-        if (allowance.lt(amountParsed)) await (await erc20.approve(this.sdk.contracts.gate.address, ethers.constants.MaxUint256)).wait();
+        const gateAddress = this.sdk.contracts.gate.address;
+        const erc20 = new ethers.Contract(
+            token.address,
+            ['function approve(address,uint256) returns (bool)', 'function allowance(address,address) view returns (uint256)'],
+            signer
+        );
+        const allowance = await erc20.allowance(signer.address, gateAddress);
+        if (allowance.lt(amountParsed)) {
+            console.log(`[GATE] Approving ${tokenSymbol} for Gate contract ${gateAddress}...`);
+            const approveTx = await erc20.approve(gateAddress, ethers.constants.MaxUint256);
+            await approveTx.wait();
+        }
 
+        console.log(`[GATE] Depositing ${amount} ${tokenSymbol} to Gate (${gateAddress})...`);
         const tx = await this.sdk.deposit(signer, token.address, amountParsed);
-        return { success: true, txHash: tx.hash };
+        let txHash = tx?.transactionHash || tx?.hash || (typeof tx === 'string' ? tx : undefined);
+        let blockNumber = tx?.blockNumber;
+
+        if (tx && typeof tx.wait === 'function') {
+            const receipt = await tx.wait();
+            txHash = receipt?.transactionHash || txHash;
+            blockNumber = receipt?.blockNumber;
+        }
+
+        console.log(`[GATE] Deposit confirmed. Tx: ${txHash}, Block: ${blockNumber}`);
+        return {
+            success: true,
+            txHash,
+            blockNumber,
+            token: tokenSymbol,
+            tokenAddress: token.address,
+            amount,
+            gateAddress
+        };
     }
 
     /**
@@ -449,8 +477,44 @@ export class SynFuturesService {
         const signer = this.getSigner();
         const token = await this.sdk.ctx.getTokenInfo(tokenSymbol);
         const amountParsed = ethers.utils.parseUnits(amount, token.decimals);
+        const gateAddress = this.sdk.contracts.gate.address;
+
+        console.log(`[GATE] Withdrawing ${amount} ${tokenSymbol} from Gate (${gateAddress})...`);
         const tx = await this.sdk.withdraw(signer, token.address, amountParsed);
-        return { success: true, txHash: tx.hash };
+        let txHash = tx?.transactionHash || tx?.hash || (typeof tx === 'string' ? tx : undefined);
+        let blockNumber = tx?.blockNumber;
+
+        if (tx && typeof tx.wait === 'function') {
+            const receipt = await tx.wait();
+            txHash = receipt?.transactionHash || txHash;
+            blockNumber = receipt?.blockNumber;
+        }
+
+        console.log(`[GATE] Withdraw confirmed. Tx: ${txHash}, Block: ${blockNumber}`);
+        return {
+            success: true,
+            txHash,
+            blockNumber,
+            token: tokenSymbol,
+            tokenAddress: token.address,
+            amount,
+            gateAddress
+        };
+    }
+
+    /**
+     * Get Gate Info
+     */
+    async getGateInfo(): Promise<any> {
+        this.ensureInitialized();
+        const gateAddress = this.sdk.contracts.gate?.address || this.sdk.config?.contractAddress?.gate;
+        const usdc = await this.sdk.ctx.getTokenInfo('USDC');
+        return {
+            gateAddress,
+            usdcAddress: usdc?.address,
+            usdcDecimals: usdc?.decimals,
+            chainId: 8453,
+        };
     }
 
     /**
