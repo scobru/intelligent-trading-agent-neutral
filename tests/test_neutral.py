@@ -256,6 +256,12 @@ class GateMarginTest(unittest.TestCase):
         self.assertEqual(plan["notional_usd"], 100.0)
         self.assertEqual(plan["margin_usd"], 50.0)
 
+    def test_release_funds(self):
+        mgr = NeutralManager()
+        res = mgr.release_funds()
+        self.assertEqual(res.get("status"), "success")
+        self.assertIn("wallet_usdc", res)
+
 
 if __name__ == "__main__":
     unittest.main()

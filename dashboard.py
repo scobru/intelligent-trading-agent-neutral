@@ -427,9 +427,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             try:
-                from base_client import BaseClient
+                client = None
+                try:
+                    if not config.PAPER_TRADING and config.WALLET_ADDRESS:
+                        from base_client import BaseClient
+                        client = BaseClient()
+                except Exception:
+                    pass
                 from neutral_manager import NeutralManager
-                client = BaseClient()
                 manager = NeutralManager(client)
                 res = manager.release_funds(target_usdc=target_amount)
                 self._json(200, res)

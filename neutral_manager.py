@@ -63,9 +63,20 @@ class NeutralManager:
 
     # ------------------------------------------------------------ mercati
     def load_markets(self) -> Dict[str, Dict[str, Any]]:
-        markets = funding.parse_markets(self.sf.funding_raw())
-        history = db_utils.funding_history(config.FUNDING_LOOKBACK_HOURS)
-        return funding.attach_history(markets, history)
+        if not self.sf:
+            try:
+                from synfutures_client import SynFuturesClient
+                self.sf = SynFuturesClient()
+            except Exception as exc:
+                logger.warning("Impossibile istanziare SynFuturesClient: %s", exc)
+                return {}
+        try:
+            markets = funding.parse_markets(self.sf.funding_raw())
+            history = db_utils.funding_history(config.FUNDING_LOOKBACK_HOURS)
+            return funding.attach_history(markets, history)
+        except Exception as exc:
+            logger.warning("Impossibile recuperare mercati SynFutures: %s", exc)
+            return {}
 
     # ------------------------------------------------------------ stato
     def _row(self, asset: str, pos: Dict[str, Any], market: Optional[Dict[str, Any]],
@@ -399,11 +410,11 @@ class NeutralManager:
         """
         markets = {}
         try:
-            markets = self.funding.get_markets()
+            markets = self.load_markets()
         except Exception as exc:
             logger.warning("Impossibile recuperare mercati per release_funds: %s", exc)
 
-        status = self.status(markets)
+        status = self.get_account_status(markets)
         positions = list(status.get("positions", []))
         closed = []
 
@@ -417,7 +428,7 @@ class NeutralManager:
                 logger.error("Errore chiusura coppia %s: %s", asset, exc)
 
         # Se non ci sono posizioni ma c'è saldo sul Gate, ritiralo
-        if not self.paper and self.sf:
+        if not self.paper and self.sf and self.client:
             try:
                 gate = self.sf.gate_usdc(self.client.address)
                 if gate > 0.01:
