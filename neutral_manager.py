@@ -138,17 +138,19 @@ class NeutralManager:
             for asset, pos in self.paper.positions.items():
                 rows.append(self._row(asset, pos, markets.get(asset)))
             idle = usdc
-        else:
+        elif self.client:
             eth = self.client.eth_balance()
             usdc = self.client.balance_of_float(config.USDC)
-            gate = self.sf.gate_usdc(wallet)
-            perps = self.sf.positions(wallet)
+            gate = self.sf.gate_usdc(wallet) if self.sf else 0.0
+            perps = self.sf.positions(wallet) if self.sf else {}
             for asset, pos in self.store.positions.items():
                 token = config.MARKETS[asset]["spot"]
                 held = self.client.balance_of_float(token)
                 rows.append(self._row(asset, pos, markets.get(asset), perps.get(asset, {"size": 0.0}),
                                       spot_qty=min(float(pos["spot_qty"]), held)))
-            idle = usdc + gate
+            idle = (usdc or 0.0) + (gate or 0.0)
+        else:
+            eth = usdc = gate = idle = 0.0
 
         invested = sum(r["value_usd"] for r in rows)
         total = idle + invested
