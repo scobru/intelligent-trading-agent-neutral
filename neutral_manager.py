@@ -391,3 +391,52 @@ class NeutralManager:
             return dict(base, status="error", transactions=txs, reason="; ".join(errors))
         self.store.record_close(asset)
         return dict(base, status="success", transactions=txs)
+
+    def release_funds(self, target_usdc: float = 0.0) -> Dict[str, Any]:
+        """
+        Chiude le posizioni delta neutral (chiude short, ritira da Gate, vende spot -> USDC)
+        per liberare liquidita' USDC per il ribilanciamento.
+        """
+        markets = {}
+        try:
+            markets = self.funding.get_markets()
+        except Exception as exc:
+            logger.warning("Impossibile recuperare mercati per release_funds: %s", exc)
+
+        status = self.status(markets)
+        positions = list(status.get("positions", []))
+        closed = []
+
+        for pos in positions:
+            asset = pos["asset"]
+            try:
+                logger.info("Chiusura coppia neutral %s per release_funds...", asset)
+                res = self.close_pair(asset, markets.get(asset), trigger="svincolo fondi")
+                closed.append({"asset": asset, "result": res})
+            except Exception as exc:
+                logger.error("Errore chiusura coppia %s: %s", asset, exc)
+
+        # Se non ci sono posizioni ma c'è saldo sul Gate, ritiralo
+        if not self.paper and self.sf:
+            try:
+                gate = self.sf.gate_usdc(self.client.address)
+                if gate > 0.01:
+                    logger.info("Ritiro di $%.2f USDC residui dal Gate...", gate)
+                    self.sf.withdraw_usdc(gate)
+            except Exception as exc:
+                logger.warning("Errore ritiro residuo dal Gate: %s", exc)
+
+        # Saldo finale wallet
+        wallet_usdc = 0.0
+        if self.paper:
+            wallet_usdc = self.paper.usdc
+        elif self.client:
+            wallet_usdc = self.client.balance_of_float(config.USDC)
+
+        return {
+            "status": "success",
+            "message": f"Svincolo completato. Saldo USDC: ${wallet_usdc:.2f}",
+            "wallet_usdc": round(wallet_usdc, 2),
+            "closed_positions": closed
+        }
+
