@@ -48,6 +48,11 @@ def _client():
 
 
 def run_cycle():
+    if db_utils.is_bot_paused():
+        pinfo = db_utils.get_pause_info()
+        print(f"⏸️ Bot Neutral in stato di PAUSA ({pinfo.get('reason', 'Pausa attiva')}). Ciclo ignorato.")
+        return None
+
     print(f"🚀 Avvio Neutral Agent su Base (wallet: {config.WALLET_ADDRESS or 'paper'})")
     if config.PAPER_TRADING:
         print(f"📝 PAPER: portafoglio virtuale, funding e prezzi reali di SynFutures. "
