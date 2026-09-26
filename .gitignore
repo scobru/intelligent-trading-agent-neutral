@@ -228,3 +228,6 @@ paper_positions.json
 node_modules/
 dist/
 paper_portfolio.json
+
+# Graphify
+graphify-out/

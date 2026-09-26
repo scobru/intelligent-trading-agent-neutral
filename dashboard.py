@@ -75,6 +75,7 @@ HTML = r"""<!DOCTYPE html>
   </div>
   <div class="header-actions">
     <span class="updated" id="updated"></span>
+    <button class="btn" id="deposit-btn" onclick="depositGate()" style="background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.4); color: #22c55e;">📥 Deposita su Gate</button>
     <button class="btn" id="run">⚡ Esegui ciclo ora</button>
   </div>
 </header>
@@ -249,6 +250,45 @@ async function load() {
 }
 
 ITA.setupTabs('chart', (t) => { chartTab = t; if (chart) { chart.destroy(); chart = null; } renderChart(); });
+
+async function depositGate() {
+  if (!confirm('Vuoi depositare tutti gli USDC disponibili nel wallet sul contratto Gate di SynFutures?')) return;
+  let token = '';
+  try { token = localStorage.getItem('runToken') || ''; } catch (e) {}
+  if (!token) {
+    token = prompt('Token di autorizzazione (DASHBOARD_RUN_TOKEN):') || '';
+    if (!token) return;
+  }
+  const btn = $('deposit-btn');
+  const prevText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Deposito in corso...'; }
+  try {
+    const r = await fetch('/api/deposit_gate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Run-Token': token
+      },
+      body: JSON.stringify({ amount: 0 })
+    });
+    const res = await r.json().catch(() => ({}));
+    if (r.ok && res.status === 'success') {
+      try { localStorage.setItem('runToken', token); } catch (e) {}
+      alert('Deposito sul Gate completato con successo!');
+      setTimeout(load, 2000);
+    } else if (r.status === 403) {
+      try { localStorage.removeItem('runToken'); } catch (e) {}
+      alert('Errore autorizzazione: ' + (res.message || 'Token non valido o DASHBOARD_RUN_TOKEN non configurato.'));
+    } else {
+      alert('Errore deposito Gate: ' + (res.message || res.error || r.statusText || 'Errore sconosciuto'));
+    }
+  } catch(e) {
+    alert('Errore chiamata: ' + e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prevText; }
+  }
+}
+
 ITA.setupRun(load);
 load();
 setInterval(load, 30000);
@@ -368,7 +408,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ("/api/run", "/api/pause", "/api/resume", "/api/release_funds"):
+        if path not in ("/api/run", "/api/pause", "/api/resume", "/api/release_funds", "/api/deposit_gate"):
             self.send_response(404)
             self.end_headers()
             return
@@ -438,6 +478,40 @@ class Handler(BaseHTTPRequestHandler):
                 manager = NeutralManager(client)
                 res = manager.release_funds(target_usdc=target_amount)
                 self._json(200, res)
+            except Exception as exc:
+                self._json(500, {"status": "error", "message": str(exc)})
+            return
+
+        if path == "/api/deposit_gate":
+            amount = 0.0
+            try:
+                clen = int(self.headers.get("Content-Length", 0))
+                if clen > 0:
+                    body = json.loads(self.rfile.read(clen).decode("utf-8"))
+                    amount = float(body.get("amount", 0.0) or body.get("amount_usd", 0.0))
+            except Exception:
+                pass
+            try:
+                from base_client import BaseClient
+                from synfutures_client import SynFuturesClient
+                from tools.deposit_gate import get_status
+                client = BaseClient() if not config.PAPER_TRADING and config.WALLET_ADDRESS else None
+                sf = SynFuturesClient()
+                if not client or not client.has_signer:
+                    self._json(400, {"status": "error", "message": "Signer Web3 non configurato o bot in modalità paper."})
+                    return
+                st = get_status(client, sf)
+                if amount <= 0:
+                    amount = float(st.get("usdc_wallet", 0.0))
+                if amount <= 0:
+                    self._json(400, {"status": "error", "message": "Nessun USDC disponibile nel wallet da depositare (saldo: 0.00 USDC)."})
+                    return
+                res = None
+                try:
+                    res = sf.deposit_usdc(amount)
+                except Exception:
+                    res = client.deposit_to_gate(config.USDC, amount)
+                self._json(200, {"status": "success", "result": res, "amount": amount})
             except Exception as exc:
                 self._json(500, {"status": "error", "message": str(exc)})
             return
