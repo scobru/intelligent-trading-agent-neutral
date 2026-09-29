@@ -4,218 +4,232 @@
 
 <br clear="left">
 
-> ⚠️ **Software sperimentale, non consulenza finanziaria.** Il bot opera con denaro reale su Base e può perdere in parte o del tutto il capitale che gli affidi. Parti in paper trading o dry-run; in live usa un wallet dedicato e solo importi che puoi permetterti di perdere. Dettagli nella sezione **Avvertenza** in fondo.
+**English** · [Italiano](README.it.md)
 
-Agente **delta-neutral su Base**: per ogni asset compra lo spot su Uniswap V3
-e apre uno short della stessa quantità sul perpetual SynFutures V3. Il prezzo
-si annulla fra le due gambe; resta il **funding**, che gli short incassano
-quando il mercato è affollato di long.
+> ⚠️ **Experimental software, not financial advice.** The bot trades real money on Base and can lose some or all of the capital you give it. Start with paper trading or dry-run; when you go live, use a dedicated wallet and only amounts you can afford to lose. See the **Disclaimer** section at the bottom.
 
-È il quarto fratello della famiglia:
+A **delta-neutral agent on Base**: for each asset it buys spot on Uniswap V3
+and opens a short of the same size on the SynFutures V3 perpetual. The price
+cancels out between the two legs; what is left is the **funding**, which shorts
+collect when the market is crowded with longs.
 
-| Bot | Cosa fa |
-|---|---|
-| [intelligent-trading-agent](https://github.com/scobru/intelligent-trading-agent) | perpetual su SynFutures V3 (direzionale) |
-| [intelligent-trading-agent-degen](https://github.com/scobru/intelligent-trading-agent-degen) | spot di token su Uniswap V3 (direzionale) |
-| [intelligent-trading-agent-yield](https://github.com/scobru/intelligent-trading-agent-yield) | rendimento passivo su lending e vault |
-| **intelligent-trading-agent-neutral** | funding carry: spot + short, senza esposizione al prezzo |
-
-Struttura, dashboard, notifiche Telegram, modalità dry-run/paper e ciclo
-decisionale LLM sono gli stessi. Riusa lo swap del bot degen/yield e il
-microservizio SynFutures del bot principale, con in più l'endpoint `/funding`.
+It is part of the [Intelligent Trading](https://github.com/scobru/intelligent-trading)
+suite of agents for Base. Structure, dashboard, Telegram notifications,
+dry-run/paper modes and the LLM decision cycle are shared with its siblings.
+It reuses the swap code of the degen/yield bots and the SynFutures
+microservice of the perp bot, with an extra `/funding` endpoint.
 
 ---
 
-## 💸 Da dove viene il rendimento
+## 💸 Where the yield comes from
 
-In SynFutures V3 il funding è **continuo**. Quando il prezzo *fair*
-dell'AMM supera il *mark* (index spot) i long pagano gli short
-`|fair − mark|` per unità al giorno, e il totale pagato si divide fra
-tutti gli short. Uno short incassa quindi:
+On SynFutures V3 funding is **continuous**. When the AMM's *fair* price is
+above the *mark* (spot index), longs pay shorts `|fair − mark|` per unit per
+day, and the total paid is shared among all the shorts. A short therefore
+collects:
 
 ```
-tasso giornaliero = (fair − mark) / mark × (totale long / totale short)
+daily rate = (fair − mark) / mark × (total long / total short)
 ```
 
-Se il fair è sotto il mark, lo short paga `(fair − mark) / mark` al giorno.
-Il fattore long/short conta: su un mercato sbilanciato verso i long lo
-short incassa più del premio, **e il nostro stesso short diluisce
-l'incasso**: il bot lo include prima di decidere.
+If fair is below mark, the short pays `(fair − mark) / mark` per day. The
+long/short ratio matters: on a market skewed toward longs the short collects
+more than the premium, **and our own short dilutes the income**: the bot
+accounts for it before deciding.
 
 ---
 
-## 🧠 Come funziona un ciclo
+## 🧠 How a cycle works
 
-1. **Funding** — da `/funding` del microservizio: spot, mark, fair e open
-   interest long/short di ogni perpetual in USDC. Ogni osservazione finisce
-   nel database: si decide sulla **media** delle ultime
-   `FUNDING_LOOKBACK_HOURS` (default 24h), mai su una lettura sola.
-2. **Stato** — spot nel wallet, short e saldo sul Gate di SynFutures, e il
-   registro `positions.json` che sa quali coppie appartengono alla strategia.
-3. **Uscite automatiche**, prima di sentire il modello:
-   - **hedge rotto**: short chiuso/liquidato o sbilanciato oltre `MAX_HEDGE_DRIFT_PCT`;
-   - **margine**: se il prezzo sale lo short perde margine (mentre lo spot
-     guadagna nel wallet); oltre `MAX_EFFECTIVE_LEVERAGE` si chiude;
-   - **funding**: media sotto `EXIT_APR` (dopo `MIN_HOLD_HOURS`) o valore
-     istantaneo sotto `PANIC_EXIT_APR`.
-4. **Decisione** — l'LLM sceglie `open` / `close` / `hold` su ETH o BTC.
-5. **Esecuzione**, con i limiti controllati nel codice (non nel prompt):
-   - storico di almeno `FUNDING_MIN_OBSERVATIONS` osservazioni;
-   - APR medio, già diluito dal nostro short, sopra `MIN_ENTRY_APR`;
-   - funding istantaneo positivo;
-   - costi di apertura + chiusura (swap, fee perp, gas) ripagati entro
+1. **Funding** — from the microservice's `/funding`: spot, mark, fair and
+   long/short open interest of every USDC perpetual. Every observation is
+   stored in the database: decisions use the **average** of the last
+   `FUNDING_LOOKBACK_HOURS` (default 24h), never a single reading.
+2. **State** — spot in the wallet, short and balance on the SynFutures Gate,
+   and the `positions.json` registry that knows which pairs belong to the
+   strategy.
+3. **Automatic exits**, before consulting the model:
+   - **broken hedge**: short closed/liquidated or off balance by more than
+     `MAX_HEDGE_DRIFT_PCT`;
+   - **margin**: if the price rises the short loses margin (while the spot
+     gains in the wallet); beyond `MAX_EFFECTIVE_LEVERAGE` the pair is closed;
+   - **funding**: average below `EXIT_APR` (after `MIN_HOLD_HOURS`) or current
+     value below `PANIC_EXIT_APR`.
+4. **Decision** — the LLM picks `open` / `close` / `hold` on ETH or BTC.
+5. **Execution**, with limits enforced in the code (not in the prompt):
+   - history of at least `FUNDING_MIN_OBSERVATIONS` observations;
+   - average APR, already diluted by our short, above `MIN_ENTRY_APR`;
+   - positive current funding;
+   - opening + closing costs (swaps, perp fees, gas) paid back within
      `MAX_BREAKEVEN_DAYS`;
-   - capitale fra `MIN_POSITION_USD` e `MAX_POSITION_USD`, max
-     `MAX_ASSET_PCT` su un asset, nozionale ≥ minimo SynFutures.
+   - capital between `MIN_POSITION_USD` and `MAX_POSITION_USD`, at most
+     `MAX_ASSET_PCT` on one asset, notional ≥ the SynFutures minimum.
 
-### Apertura e chiusura di una coppia
+### Opening and closing a pair
 
-Con capitale `C` e leva dello short `L` (default 2):
+With capital `C` and short leverage `L` (default 2):
 
-1. swap USDC → spot per il nozionale `N = C × L / (L + 1)`;
-2. deposito del margine `M = C − N` sul Gate SynFutures;
-3. short della **stessa quantità** comprata.
+1. swap USDC → spot for the notional `N = C × L / (L + 1)`;
+2. deposit the margin `M = C − N` on the SynFutures Gate;
+3. short **the same quantity** that was bought.
 
-Se lo short fallisce, lo spot appena comprato viene **rivenduto subito**: una
-gamba sola è esattamente il rischio che la strategia vuole evitare. La
-chiusura fa il percorso inverso (chiude lo short, ritira dal Gate, vende lo
-spot); se un passo fallisce la coppia resta nel registro e il ciclo
-successivo la vede come hedge rotto e riprova.
+If the short fails, the spot just bought is **sold right away**: a single leg
+is exactly the risk the strategy wants to avoid. Closing goes the other way
+(close the short, withdraw from the Gate, sell the spot); if a step fails the
+pair stays in the registry and the next cycle sees it as a broken hedge and
+retries.
 
-### 🚪 Collaterale sul Gate di SynFutures
+### 🚪 Collateral on the SynFutures Gate
 
-Su SynFutures V3 i fondi a garanzia dei contratti perpetual risiedono nel contratto **Gate** (`0x208B443983D8BcC8578e9D86Db23FbA547071270` su Base).
+On SynFutures V3 the collateral for perpetual contracts sits in the **Gate**
+contract (`0x208B443983D8BcC8578e9D86Db23FbA547071270` on Base).
 
-#### Quanti USDC servono sul Gate?
-La quantita' necessaria dipende dai parametri di dimensionamento (`MIN_POSITION_USD = $150`, `PERP_LEVERAGE = 2`):
-- Per una posizione minima da $150: nozionale spot $100, margine short $50.
-- Il protocollo/microservizio accetta ordini solo fino al **90%** del saldo Gate (`availableMargin × 0.9`), a cui si somma un cuscinetto del **+20%** (`GATE_MARGIN_BUFFER = 1.20`) per assorbire funding negativo o variazioni di prezzo senza rischiare la chiusura anticipata.
-- **Minimo per 1 coppia (es. ETH):** **~60-67 USDC** sul Gate (+ 100 USDC nel wallet per lo spot).
-- **Minimo per 2 coppie (ETH + BTC):** **~120-135 USDC** sul Gate (+ 200 USDC nel wallet per lo spot).
-- **Portafoglio da $1.000:** **~350-400 USDC** sul Gate e il resto nel wallet.
+#### How much USDC is needed on the Gate?
 
-#### Strumento di gestione Gate:
+It depends on the sizing parameters (`MIN_POSITION_USD = $150`,
+`PERP_LEVERAGE = 2`):
+- For a minimum $150 position: $100 spot notional, $50 short margin.
+- The protocol/microservice accepts orders only up to **90%** of the Gate
+  balance (`availableMargin × 0.9`), plus a **+20%** buffer
+  (`GATE_MARGIN_BUFFER = 1.20`) to absorb negative funding or price moves
+  without risking an early close.
+- **Minimum for 1 pair (e.g. ETH):** **~60-67 USDC** on the Gate (+ 100 USDC
+  in the wallet for the spot).
+- **Minimum for 2 pairs (ETH + BTC):** **~120-135 USDC** on the Gate (+ 200
+  USDC in the wallet for the spot).
+- **$1,000 portfolio:** **~350-400 USDC** on the Gate and the rest in the
+  wallet.
+
+#### Gate management tool
+
 ```bash
-# Verifica saldi e fabbisogno calcolato per la strategia
+# Check balances and the amount the strategy needs
 python tools/deposit_gate.py --status
 
-# Deposita automaticamente l'importo raccomandato sul Gate
+# Deposit the recommended amount on the Gate automatically
 python tools/deposit_gate.py --deposit
 
-# Deposita o ritira un importo personalizzato
+# Deposit or withdraw a custom amount
 python tools/deposit_gate.py --deposit --amount 100
 python tools/deposit_gate.py --withdraw --amount 50
 ```
 
 ---
 
-## 🚀 Avvio
+## 🚀 Getting started
 
 ```bash
-cp .env.example .env        # chiavi e parametri
+cp .env.example .env        # keys and parameters
 docker compose up -d --build
 ```
 
-In locale senza Docker servono Python 3.11 e Node 20:
+Locally without Docker you need Python 3.11 and Node 20:
 
 ```bash
 pip install -r requirements.txt
 (cd synfutures-service && npm install && npm run build && node dist/index.js &)
-python dashboard.py &       # dashboard su http://localhost:3000
-python main.py              # un ciclo
+python dashboard.py &       # dashboard at http://localhost:3000
+python main.py              # one cycle
 ```
 
-### Modalità
+### Modes
 
-| Modalità | Variabile | Cosa succede |
+| Mode | Variable | What happens |
 |---|---|---|
-| **Paper** | `PAPER_TRADING=true` | Portafoglio virtuale (`PAPER_START_USDC`, default $1000) con **prezzi e funding reali** di SynFutures: a ogni ciclo lo short matura il funding osservato. Non servono wallet né chiave. |
-| **Dry-run** (default) | `DRY_RUN=true` | Legge il wallet vero, decide, valida i limiti e mostra il piano delle transazioni senza firmarle. |
-| **Live** | `DRY_RUN=false` | Firma swap, deposito sul Gate e short. |
+| **Paper** | `PAPER_TRADING=true` | Virtual portfolio (`PAPER_START_USDC`, default $1000) with **real SynFutures prices and funding**: every cycle the short earns the observed funding. No wallet or key needed. |
+| **Dry-run** (default) | `DRY_RUN=true` | Reads the real wallet, decides, validates the limits and shows the transaction plan without signing it. |
+| **Live** | `DRY_RUN=false` | Signs swaps, the Gate deposit and the short. |
 
-Il microservizio parte sempre (il funding si legge da lì) ma in paper e
-dry-run gira **senza chiave**, in sola lettura.
+The microservice always starts (funding is read from it), but in paper and
+dry-run it runs **without a key**, read-only.
 
-**Parti dal paper**: il bot non entra finché non ha almeno
-`FUNDING_MIN_OBSERVATIONS` osservazioni, quindi per le prime ore resta in
-hold per costruzione. In live usa un wallet dedicato.
+**Start with paper**: the bot does not enter until it has at least
+`FUNDING_MIN_OBSERVATIONS` observations, so for the first hours it holds by
+design. When live, use a dedicated wallet.
 
-### ⛽ Rifornimento Automatico (Auto-Refuel ETH -> USDC)
+### ⛽ Auto-refuel (ETH → USDC)
 
-Se il wallet ha USDC insufficienti (< `USDC_AUTO_SWAP_THRESHOLD`, default $5.0) ma possiede ETH nativo, l'agente converte in automatico l'ETH in eccesso in USDC tramite Uniswap V3 all'inizio del ciclo, riservando sempre l'ETH per pagare le fee (`ETH_GAS_RESERVE`, default 0.003 ETH).
-In questo modo è sufficiente inviare solo ETH al wallet per rendere il bot operativo, senza dover inviare separatamente anche USDC.
+If the wallet holds too little USDC (< `USDC_AUTO_SWAP_THRESHOLD`, default
+$5.0) but has native ETH, the agent automatically converts the excess ETH into
+USDC on Uniswap V3 at the start of the cycle, always keeping the ETH needed for
+fees (`ETH_GAS_RESERVE`, default 0.003 ETH). Sending only ETH to the wallet is
+enough to make the bot operational.
 
 ```bash
-# Controllo rapido o esecuzione manuale refuel
+# Quick check or manual refuel
 python main.py --refuel
 
-# Ispezione saldi wallet con il tool dedicato
+# Inspect wallet balances with the dedicated tool
 python tools/refuel.py --status
 ```
 
 ### CapRover
 
-App con volume persistente su `/app/data` (database, registro coppie, stato
-paper), porta HTTP 3000, variabili da `.env.example`.
+An app with a persistent volume on `/app/data` (database, pair registry, paper
+state), HTTP port 3000, variables from `.env.example`.
 
 ---
 
-## 📱 Telegram e dashboard
+## 📱 Telegram and dashboard
 
-Comandi: `/status`, `/positions`, `/funding`, `/last`, `/run`, accettati
-**solo** dalla chat `TELEGRAM_CHAT_ID`.
+Commands: `/status`, `/positions`, `/funding`, `/last`, `/run`, accepted
+**only** from the `TELEGRAM_CHAT_ID` chat.
 
-La dashboard ha lo stesso design system dei tre bot fratelli
-(`static/dashboard.css` e `static/dashboard.js`, identici nei quattro
-repository): badge di modalità, pannello paper, pannello wallet con l'ETH per
-il gas, andamento del capitale, **storico del funding** per asset, coppie
-aperte con leva effettiva, storico operazioni ed errori. Il pulsante "Esegui
-ciclo ora" è attivo solo con `DASHBOARD_RUN_TOKEN`.
+The dashboard uses the design system shared by every agent in the suite
+(`static/dashboard.css` and `static/dashboard.js`, identical in every
+repository): mode badge, paper panel, wallet panel with ETH for gas, equity
+curve, **funding history** per asset, open pairs with effective leverage,
+operation history and errors. The "Run cycle now" button is enabled only with
+`DASHBOARD_RUN_TOKEN`.
 
 ---
 
-## 📁 Struttura
+## 📁 Structure
 
-| File | Ruolo |
+| File | Role |
 |---|---|
-| `main.py` | un ciclo: funding, stato, uscite di rischio, decisione, esecuzione |
-| `funding.py` | calcolo del funding dello short, diluizione, costi e breakeven |
-| `neutral_manager.py` | stato delle coppie, limiti, apertura/chiusura delle due gambe |
-| `neutral_agent.py` | chiamata LLM, schema JSON, fallback su hold |
-| `synfutures_client.py` | client REST del microservizio |
-| `synfutures-service/` | microservizio Node (Oyster SDK), con l'endpoint `/funding` |
-| `base_client.py`, `uniswap.py` | chain Base e swap su Uniswap V3 (come nel bot yield) |
-| `positions.py` | registro delle coppie aperte |
-| `paper.py` | portafoglio virtuale che matura il funding reale |
-| `db_utils.py` | SQLite: snapshot, osservazioni del funding, operazioni, errori |
-| `dashboard.py`, `telegram_bot.py` | interfacce |
-| `tests/` | test offline (`python -m pytest tests`) |
+| `main.py` | one cycle: funding, state, risk exits, decision, execution |
+| `funding.py` | short funding math, dilution, costs and break-even |
+| `neutral_manager.py` | pair state, limits, opening/closing both legs |
+| `neutral_agent.py` | LLM call, JSON schema, fallback to hold |
+| `synfutures_client.py` | REST client for the microservice |
+| `synfutures-service/` | Node microservice (Oyster SDK), with the `/funding` endpoint |
+| `base_client.py`, `uniswap.py` | Base chain and Uniswap V3 swaps (as in the yield bot) |
+| `positions.py` | registry of open pairs |
+| `paper.py` | virtual portfolio that earns the real funding |
+| `db_utils.py` | SQLite: snapshots, funding observations, operations, errors |
+| `dashboard.py`, `dashboard_auth.py`, `telegram_bot.py` | interfaces and token check for dashboard commands |
+| `tests/` | offline tests (`python -m pytest tests`) |
 
 ---
 
-## ⚠️ Avvertenza
+## ⚠️ Disclaimer
 
-Questo software è sperimentale ed è fornito "così com'è", senza garanzie di alcun tipo
-(vedi la licenza MIT). Non è consulenza finanziaria né un invito a investire.
+This software is experimental and provided "as is", without warranty of any
+kind (see the MIT license). It is not financial advice nor an invitation to
+invest.
 
-- **Puoi perdere denaro.** Bug, decisioni sbagliate del modello, slippage, exploit dei protocolli,
-  oracoli manipolati e liquidazioni possono far perdere in parte o del tutto il capitale.
-- **Le decisioni le prende un LLM.** Può sbagliare o comportarsi in modo imprevedibile: i limiti
-  dell'esecutore riducono il danno, non lo azzerano. I rendimenti passati, anche in paper, non
-  garantiscono quelli futuri.
-- **Parti in paper o dry-run.** In live usa un wallet dedicato al bot, con importi che puoi
-  permetterti di perdere, e non riutilizzare quella chiave privata altrove.
-- **Proteggi le chiavi.** La chiave privata va solo nelle variabili d'ambiente del deploy: non
-  committarla mai. Senza `DASHBOARD_RUN_TOKEN` i comandi della dashboard restano disattivati:
-  impostalo con un valore lungo e casuale prima di esporla su Internet.
-- **Leggi e tasse.** Sei responsabile del rispetto delle norme e degli obblighi fiscali del tuo paese.
+- **You can lose money.** Bugs, wrong model decisions, slippage, protocol
+  exploits, manipulated oracles and liquidations can cause the loss of some or
+  all of your capital.
+- **Decisions are made by an LLM.** It can be wrong or behave unpredictably:
+  the executor's limits reduce the damage, they do not eliminate it. Past
+  results, paper ones included, do not guarantee future ones.
+- **Start with paper or dry-run.** When live, use a wallet dedicated to the
+  bot, with amounts you can afford to lose, and never reuse that private key
+  elsewhere.
+- **Protect your keys.** The private key belongs only in the deployment's
+  environment variables: never commit it. Without `DASHBOARD_RUN_TOKEN` the
+  dashboard commands stay disabled: set it to a long random value before
+  exposing the dashboard to the Internet.
+- **Laws and taxes.** You are responsible for complying with the rules and tax
+  obligations of your country.
 
-**Rischi specifici di questo bot.** Delta-neutral non vuol dire senza rischio: il funding può girare e restare
-negativo, un rialzo violento mette sotto pressione il margine dello short,
-l'esecuzione delle due gambe non è atomica e smart contract e oracoli possono
-fallire. Nessuna garanzia, nessuna promessa di rendimento. Software fornito
-così com'è.
+**Risks specific to this bot.** Delta-neutral does not mean risk-free: funding
+can flip and stay negative, a violent rally puts pressure on the short's
+margin, the two legs are not executed atomically, and smart contracts and
+oracles can fail. No guarantees, no promised returns.
 
-## 📜 Licenza
+## 📜 License
 
 MIT.
