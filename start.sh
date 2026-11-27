@@ -10,10 +10,12 @@ INTERVAL="${TRADING_INTERVAL:-1800}"
 
 # 1. Microservizio SynFutures: serve sempre, anche in paper, perche' il
 #    funding si legge da li'. Senza SYNFUTURES_PRIVATE_KEY non firma nulla.
-echo "[1/3] Starting SynFutures microservice on port 3100..."
+# the multi-agent runner gives each agent its own port via SYNFUTURES_SERVICE_URL
+SF_URL="${SYNFUTURES_SERVICE_URL:-http://localhost:3100}"
+export SYNFUTURES_PORT="${SYNFUTURES_PORT:-${SF_URL##*:}}"
+echo "[1/3] Starting SynFutures microservice on port $SYNFUTURES_PORT..."
 (
     cd /app/synfutures-service
-    export SYNFUTURES_PORT=3100
     # l'SDK legge l'RPC da BASE_RPC: la allineiamo a BASE_RPC_URL del bot
     export BASE_RPC="${BASE_RPC:-${BASE_RPC_URL:-https://mainnet.base.org}}"
     export SYNFUTURES_PRIVATE_KEY="${SYNFUTURES_PRIVATE_KEY:-${PRIVATE_KEY:-}}"
@@ -25,7 +27,7 @@ echo "[1/3] Starting SynFutures microservice on port 3100..."
 ) &
 
 for i in $(seq 1 30); do
-    curl -s http://localhost:3100/health > /dev/null 2>&1 && break
+    curl -s http://localhost:$SYNFUTURES_PORT/health > /dev/null 2>&1 && break
     sleep 1
 done
 
